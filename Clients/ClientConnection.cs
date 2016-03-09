@@ -12,8 +12,9 @@ namespace STOMP.Server.Clients
     public class ClientConnection : IDisposable
     {
         public IList<ClientSubscription> Subscriptions { get; private set; }
-        private IList<RequiredAck> FramesAwaitingACK;
         private IDictionary<string, Queue<StompFrame>> TransactionQueue;
+
+        private IDictionary<string, Tuple<ClientSubscription, RequiredAck>> AckIdToData;
 
         private static long _MessageId;
         private static long _Ack;
@@ -64,8 +65,19 @@ namespace STOMP.Server.Clients
 
                 if (CS.AckType != ClientSubscription.AcknowledgementType.None)
                 {
-                    Frame.Ack = Interlocked.Increment(ref _Ack).ToString();
-                    FramesAwaitingACK.Add(new RequiredAck() { Ack = Frame.Ack, Frame = Frame, HasTransactedAck = false, SubscriptionId = CS.Id });
+                    long Ack = Interlocked.Increment(ref _Ack);
+                    Frame.Ack = Ack.ToString();
+                    RequiredAck RA = new RequiredAck()
+                    {
+                        AckId = Frame.Ack,
+                        AckNum = Ack,
+                        Frame = Frame,
+                        HasTransactedAck = false,
+                        SubscriptionId = CS.Id,
+                        FrameSent = DateTime.Now
+                    };
+                    CS.FramesAwaitingAck.Add(RA);
+                    AckIdToData.Add(Frame.Ack, new Tuple<ClientSubscription, RequiredAck>(CS, RA));
                 }
 
                 _Outbox.Enqueue(Frame);
@@ -200,6 +212,30 @@ namespace STOMP.Server.Clients
             }
         }
 
+
+        private void ProcessAck(StompAckFrame Frame)
+        {
+            // Mark a frame off
+            ClientSubscription CS = AckIdToData[Frame.Id].Item1;
+            RequiredAck RA = AckIdToData[Frame.Id].Item2;
+            switch (CS.AckType)
+            {
+                case ClientSubscription.AcknowledgementType.Client:
+                    foreach (RequiredAck RA2 in CS.FramesAwaitingAck.Where(x => x.AckNum <= RA.AckNum))
+                    {
+                        CS.FramesAwaitingAck.Remove(RA2);
+                        AckIdToData.Remove(RA2.AckId);
+                        //_Server.Plugins.HookFrameAcknowledged(RA2.Frame);
+                    }
+                    break;
+                case ClientSubscription.AcknowledgementType.ClientIndividual:
+                    CS.FramesAwaitingAck.Remove(RA);
+                    AckIdToData.Remove(Frame.Id);
+                    //_Server.Plugins.HookFrameAcknowledged(Frame);
+                    break;
+            }
+        }
+
         internal int Tick(int IntervalTime)
         {
             // Read
@@ -225,14 +261,15 @@ namespace STOMP.Server.Clients
             while (TryBuildPacket(_InBuffer))
                 ;
 
+            // Check for any frames that have not been ACK'd, are not transaction-queued, and are stale
+
+
             // Send all queued frames
             StompFrame Frame = null;
             while (_Outbox.TryDequeue(out Frame))
             {
+                // TODO add sent frames to Ack-needed list
                 Write(Frame.Serialize());
-
-                
-
             }
             _ClientConnection.GetStream().Flush();
 

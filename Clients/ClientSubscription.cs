@@ -13,6 +13,7 @@ namespace STOMP.Server.Clients
         public Regex Filter { get; private set; }
         public string Id { get; private set; }
         public AcknowledgementType AckType { get; private set; }
+        public IList<RequiredAck> FramesAwaitingAck { get; private set; }
 
         public enum AcknowledgementType
         {
@@ -25,6 +26,7 @@ namespace STOMP.Server.Clients
         {
             Filter = new Regex(SubscriptionFrame.Destination);
             Id = SubscriptionFrame.Id;
+            FramesAwaitingAck = new List<RequiredAck>();
 
             switch (SubscriptionFrame.AckSetting.ToLower())
             {
