@@ -5,45 +5,98 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using STOMP.Server.Clients;
+using System.Security;
+using System.Security.Policy;
+using System.Security.Permissions;
 using System.Threading.Tasks;
 using System.Reflection;
+using System.IO;
 
 namespace STOMP.Server.Plugins
 {
     public class PluginInterface
     {
         private STOMPServer _Server;
+        private Dictionary<string, PluginSettings> _PluginConfig;
+
+        public string PluginBasePath { get; set; }
+
+        /* 
+                * Some notes regarding plugin loading...
+                * I should use a separate AppDomain for each plugin, and use a proxy.  This will likely impact performance a bit, but it wil give me the ability to load and *unload* plugins dynamically
+                * Also, how to bind plugin hooks?
+                *  
+                */
+
+        private AppDomain CreatePluginAppDomain(string PluginFriendlyName)
+        {
+            PermissionSet PermSet = new PermissionSet(PermissionState.None);
+            PermSet.AddPermission(new FileIOPermission(FileIOPermissionAccess.Read | FileIOPermissionAccess.Write | FileIOPermissionAccess.Append, PluginBasePath + Path.DirectorySeparatorChar + PluginFriendlyName));
+            PermSet.AddPermission(new SecurityPermission(SecurityPermissionFlag.Execution));
+
+            StrongName ServerAssembly = typeof(PluginInterface).Assembly.Evidence.GetHostEvidence<StrongName>();
+
+            AppDomainSetup DomainSetup = new AppDomainSetup();
+
+            DomainSetup.ApplicationBase = Path.GetFullPath("Plugins");
+            DomainSetup.DisallowBindingRedirects = false;
+            DomainSetup.DisallowCodeDownload = true;
+            DomainSetup.ConfigurationFile = AppDomain.CurrentDomain.SetupInformation.ConfigurationFile;
+
+            AppDomain Domain = AppDomain.CreateDomain("PluginDomain_" + PluginFriendlyName, null, DomainSetup, PermSet, ServerAssembly);
+
+            return Domain;
+        }
+
+        private bool DestroyPluginAppDomain(AppDomain Domain)
+        {
+            try
+            {
+                AppDomain.Unload(Domain);
+            }
+            catch (CannotUnloadAppDomainException ex)
+            {
+                Console.WriteLine("Failed to destroy domain " + Domain.FriendlyName);
+                Console.WriteLine(ex.Message.ToString());
+
+                // Failed to destroy domain - could be a plugin trying to play dirty
+                // TODO do something about it
+                return false;
+            }
+            return true;
+        }
 
         internal PluginInterface(STOMPServer Server)
         {
             _Server = Server;
-            PluginConfig = new Dictionary<string, PluginConfig>();
+            _PluginConfig = new Dictionary<string, PluginSettings>();
 
             // TODO Load Plugins here
         }
-        
+
         public bool SendRawFrame(StompFrame Frame)
         {
-
+            // TODO send raw frame to client
             return false;
         }
 
         public bool StopServer()
         {
+            // TODO stop server
             return false;
         }
 
         #region Plugin Management
 
-        private Dictionary<string, PluginConfig> PluginConfig;
-
-        public void SetPermission(PluginConfig Plugin, PluginPermissions Permission, bool PermissionSetting)
+        public void SetPermission(PluginSettings Plugin, PluginPermissions Permission, bool PermissionSetting)
         {
-
+            // TODO set plugin permission
         }
 
         internal PluginPermissions[] RegisterForEvents(Type PluginClass)
         {
+            // TODO Register plugin for events 
+
             // Check permissions list for this plugin
 
 
@@ -57,33 +110,61 @@ namespace STOMP.Server.Plugins
             return null;
         }
 
-        public void LoadPlugin(PluginConfig Plugin)
+        public void LoadPlugin(PluginSettings Plugin)
         {
+            // TODO Load plugin
+            Plugin.Domain = CreatePluginAppDomain(Plugin.FriendlyName);
+            
 
+
+            Plugin.Domain.Load(Plugin.QualifiedName);
+            Plugin.Domain.CreateInstanceAndUnwrap(Plugin.QualifiedName, Plugin.FileName);
         }
 
-        public void UnloadPlugin(PluginConfig Plugin)
+        public bool UnloadPlugin(PluginSettings Plugin)
         {
-
+            Plugin.Loaded = false;
+            Plugin.MessageSubscriptions = null;
+            if (DestroyPluginAppDomain(Plugin.Domain))
+            {
+                Plugin.Domain = null;
+                return true;
+            }
+            return false;
         }
 
-        public IEnumerable<PluginConfig> GetPlugins()
+        public IEnumerable<PluginSettings> GetPlugins()
         {
+            // TODO get current plugins
             return null;
         }
 
         public bool HasPermission(Assembly Plugin, PluginPermissions Permission)
         {
-            return PluginConfig.ContainsKey(Plugin.GetName().Name) && PluginConfig[Plugin.GetName().Name].ActivePermissions.Contains(Permission);
+            return _PluginConfig.ContainsKey(Plugin.GetName().Name) && _PluginConfig[Plugin.GetName().Name].ActivePermissions.Contains(Permission);
+        }
+
+        public void LoadConfig()
+        {
+
         }
 
         #endregion
 
         #region Event Hooks
 
-        internal StompFrame HookInterceptFrame(StompFrame Frame)
+        internal bool HookInterceptIncomingFrame(ClientConnection Client, StompFrame Frame)
         {
-            return Frame;
+            // TODO intercept frames
+
+            return false;
+        }
+
+        internal bool HookInterceptOutgoingFrame(ClientConnection Client, StompFrame Frame)
+        {
+            // TODO intercept frames
+
+            return false;
         }
 
         /// <summary>
@@ -92,7 +173,7 @@ namespace STOMP.Server.Plugins
         /// <param name="ConnectionFrame"></param>
         internal void HookQuerySuccessfulConnect(StompFrame ConnectionFrame)
         {
-
+            // TODO notify plugins of successful connection
         }
 
         /// <summary>
@@ -101,7 +182,7 @@ namespace STOMP.Server.Plugins
         /// <param name="ConnectionFrame"></param>
         internal void HookQueryFailedConnect(StompFrame ConnectionFrame)
         {
-
+            // TODO notify plugins of failed connection
         }
 
         /// <summary>
@@ -113,8 +194,14 @@ namespace STOMP.Server.Plugins
         /// </returns>
         internal bool HookCancelConnect(StompFrame ConnectionFrame, out string FailReason)
         {
+            // TODO ask plugins if connection should be failed
             FailReason = "";
             return false;
+        }
+
+        internal void HookAcknowledgeReceived(StompAckFrame AckFrame)
+        {
+            // TODO Notify plugins of frame (N)Ack
         }
 
         #endregion
@@ -123,7 +210,7 @@ namespace STOMP.Server.Plugins
 
         internal void MessageReceived(ClientConnection Sender, StompMessageFrame Message)
         {
-            foreach (PluginConfig Plugin in PluginConfig.Values)
+            foreach (PluginSettings Plugin in _PluginConfig.Values)
             {
                 if (Plugin.ActivePermissions.Contains(PluginPermissions.ReceiveMessage) &&
                     Plugin.MessageSubscriptions != null &&
@@ -140,7 +227,7 @@ namespace STOMP.Server.Plugins
             if (!HasPermission(Assembly.GetCallingAssembly(), PluginPermissions.ReceiveMessage))
                 throw new InvalidPermissionsException(PluginPermissions.ReceiveMessage);
 
-            PluginConfig[Assembly.GetCallingAssembly().GetName().Name].MessageSubscriptions = Subscriptions;
+            _PluginConfig[Assembly.GetCallingAssembly().GetName().Name].MessageSubscriptions = Subscriptions;
         }
 
         public void SendMessage(string Destination, StompMessageFrame Message)
@@ -148,7 +235,7 @@ namespace STOMP.Server.Plugins
             if (!HasPermission(Assembly.GetCallingAssembly(), PluginPermissions.SendMessage))
                 throw new InvalidPermissionsException(PluginPermissions.SendMessage);
 
-            _Server.Send(Message, Destination);
+            // TODO send to each individual client
         }
 
         #endregion
