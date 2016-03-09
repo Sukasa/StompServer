@@ -50,7 +50,6 @@ namespace STOMP.Server.Clients
             Disconnected
         }
 
-
         internal void SendMessage(StompMessageFrame Frame, string Destination)
         {
             Frame.Destination = Destination;
@@ -172,32 +171,13 @@ namespace STOMP.Server.Clients
                     {
                         if (Frame.TransactionId != null)
                         {
-                            // TODO Transactions
-                            if (Frame is StompCommitFrame)
-                            {
-                                // Push transaction queue to inbox
-                                // Except for ACK/NACK frames - just clear the ACK list with those
-                            }
-                            else if (Frame is StompBeginFrame)
-                            {
-                                // Create new transaction queue
-                            }
-                            else if (Frame is StompAbortFrame)
-                            {
-                                // Dump transaction queue
-                                // For any ACKs or NACKs, mark off the matching frame awaiting ACK/NACK that an ACK/NACK has not been recieved
-                            }
-                            else
-                            {
-                                // Append to transaction queue
-                                // If this is an ACK or NACK, mark off the matching frame awaiting ACK/NACK that the reply is queued in a transaction to avoid spurious sends
-                            }
+                            HandleTransactedFrame(Frame);
                         }
                         else
                         {
                             if (Frame is StompAckFrame)
                             {
-                                // Mark off the Ack
+                                ProcessAck((StompAckFrame)Frame);
                             }
                             _Server.AddToInbox(Frame, this);
                         }
@@ -212,6 +192,54 @@ namespace STOMP.Server.Clients
             }
         }
 
+        private void HandleTransactedFrame(StompFrame Frame)
+        {
+            if (Frame is StompCommitFrame)
+            {
+                // Push transaction queue to inbox and/or handle (N)Acks
+                foreach (StompFrame TXFrame in TransactionQueue[Frame.TransactionId])
+                {
+                    TXFrame.TransactionId = null;
+                    HandleFrame(TXFrame);
+                }
+            }
+            else if (Frame is StompBeginFrame)
+            {
+                // Create new transaction queue
+                StompBeginFrame SBF = (StompBeginFrame)Frame;
+                TransactionQueue.Add(SBF.TransactionId, new Queue<StompFrame>());
+            }
+            else if (Frame is StompAbortFrame)
+            {
+                // Dump transaction queue
+                StompAbortFrame SAF = (StompAbortFrame)Frame;
+
+                Queue<StompFrame> Frames = TransactionQueue[SAF.TransactionId];
+                TransactionQueue.Remove(SAF.TransactionId);
+
+                // For any ACKs or NACKs, mark off the matching frame awaiting ACK/NACK that an ACK/NACK has not been recieved
+                foreach (StompFrame TXFrame in Frames)
+                {
+                    if (TXFrame is StompAckFrame)
+                    {
+                        StompAckFrame TXAck = (StompAckFrame)TXFrame;
+                        AckIdToData[TXAck.Id].Item2.HasTransactedAck = false;
+                        AckIdToData[TXAck.Id].Item2.FrameSent = DateTime.Now;
+                    }
+                }
+            }
+            else
+            {
+                // Append to transaction queue
+                TransactionQueue[Frame.TransactionId].Enqueue(Frame);
+
+                // If this is an ACK or NACK, mark off the matching frame awaiting ACK/NACK that the reply is queued in a transaction to avoid spurious sends
+                if (Frame is StompAckFrame)
+                {
+                    AckIdToData[((StompAckFrame)Frame).Id].Item2.HasTransactedAck = true;
+                }
+            }
+        }
 
         private void ProcessAck(StompAckFrame Frame)
         {
