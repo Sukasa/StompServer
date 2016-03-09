@@ -128,8 +128,8 @@ namespace STOMP.Server.Clients
             if (Heartbeat[1] > 0)
                 Heartbeat[1] = Math.Max(Heartbeat[1], 1000);
 
-            _HeartbeatRXInterval = Heartbeat[0];
-            _HeartbeatTXInterval = Heartbeat[1];
+            _HeartbeatRXInterval = (int)(Heartbeat[0] * 1.5);
+            _HeartbeatTXInterval = (int)(Heartbeat[1] * 1.5);
 
             StompConnectedFrame ConFrame = new StompConnectedFrame()
             {
@@ -244,6 +244,13 @@ namespace STOMP.Server.Clients
                 byte[] Data = new byte[Math.Min(_ClientConnection.Available, _InBuffer.AvailableWrite)];
                 int Amt = _ClientConnection.GetStream().Read(Data, 0, Data.Length);
                 _InBuffer.Write(Data, Amt);
+                _HeartbeatRXCountdown = _HeartbeatRXInterval;
+            }
+
+            if (_HeartbeatRXCountdown < 0)
+            {
+                Error("No Heartbeat", "No data was recieved in the required time period");
+                return int.MaxValue;
             }
 
             // Advance through any heartbeats rx'd or frame separators
@@ -273,8 +280,7 @@ namespace STOMP.Server.Clients
             }
             _ClientConnection.GetStream().Flush();
 
-            return 15; // TODO heartbeat period here
-
+            return _HeartbeatRXCountdown;
         }
 
         internal void Write(byte[] Data)
