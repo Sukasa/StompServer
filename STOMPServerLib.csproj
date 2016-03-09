@@ -47,7 +47,17 @@
     <ErrorReport>prompt</ErrorReport>
     <CodeAnalysisRuleSet>MinimumRecommendedRules.ruleset</CodeAnalysisRuleSet>
   </PropertyGroup>
+  <PropertyGroup>
+    <SignAssembly>true</SignAssembly>
+  </PropertyGroup>
+  <PropertyGroup>
+    <AssemblyOriginatorKeyFile>Standard.pfx</AssemblyOriginatorKeyFile>
+  </PropertyGroup>
   <ItemGroup>
+    <Reference Include="Newtonsoft.Json, Version=7.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>..\HackerspaceData\packages\Newtonsoft.Json.7.0.1\lib\net45\Newtonsoft.Json.dll</HintPath>
+    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Xml.Linq" />
@@ -62,8 +72,10 @@
     <Compile Include="Directory.cs" />
     <Compile Include="Plugins\IMessageHandler.cs" />
     <Compile Include="Plugins\InvalidPermissionsException.cs" />
-    <Compile Include="Plugins\IPlugin.cs" />
-    <Compile Include="Plugins\PluginConfig.cs" />
+    <Compile Include="Plugins\PluginBase.cs" />
+    <Compile Include="Plugins\PluginProxy.cs" />
+    <Compile Include="Plugins\PluginSettings.cs" />
+    <Compile Include="ServerConfiguration.cs" />
     <Compile Include="Plugins\PluginInterface.cs" />
     <Compile Include="UsernameDirectory.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
@@ -75,6 +87,10 @@
       <Project>{c7a3584d-5c62-466c-9633-63e656ce96ae}</Project>
       <Name>STOMPShared</Name>
     </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+    <None Include="Standard.pfx" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
