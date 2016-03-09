@@ -23,8 +23,7 @@ namespace STOMP.Server
         private ConcurrentDictionary<string, ClientConnection> _Connections = new ConcurrentDictionary<string, ClientConnection>();
 
         // I/O support (Multithreaded)
-        private ConcurrentQueue<Tuple<string, StompFrame>> Outbox = new ConcurrentQueue<Tuple<string, StompFrame>>();
-        private BlockingCollection<Tuple<string, StompFrame>> OutboxController;
+        // No Outbox - each client has a separate outbox
         private ConcurrentQueue<Tuple<ClientConnection, StompFrame>> Inbox = new ConcurrentQueue<Tuple<ClientConnection, StompFrame>>();
         private BlockingCollection<Tuple<ClientConnection, StompFrame>> InboxController;
 
@@ -52,11 +51,6 @@ namespace STOMP.Server
             InboxController.Add(new Tuple<ClientConnection, StompFrame>(Sender, Frame));
         }
 
-        internal void Send(StompFrame Frame, String Destination)
-        {
-            OutboxController.Add(new Tuple<string, StompFrame>(Destination, Frame));
-        }
-
         internal void RemoveClient(ClientConnection Client)
         {
             // TODO notify plugins
@@ -82,28 +76,14 @@ namespace STOMP.Server
             }
         }
 
-        private void OutboxThread()
-        {
-            while (true)
-            {
-                Tuple<string, StompFrame> Message = OutboxController.Take();
-
-                foreach (ClientConnection C in _Connections.Values)
-                {
-                    C.Send(Message.Item2, Message.Item1);
-                }
-            }
-        }
-
         private void Run()
         {
             // Load plugins
             _PluginManager = new PluginInterface(this);
 
             InboxController = new BlockingCollection<Tuple<ClientConnection, StompFrame>>(Inbox);
-            OutboxController = new BlockingCollection<Tuple<string, StompFrame>>(Outbox);
 
-            _Listener = new TcpListener(IPAddress.Parse("0.0.0.0"), 80);
+            _Listener = new TcpListener(IPAddress.Any, 80);
             _Listener.Start();
             int SleepTime = 1000;
             int LastSleepTime = 0;
